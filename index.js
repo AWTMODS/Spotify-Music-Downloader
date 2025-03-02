@@ -14,7 +14,7 @@ const USERS_FILE = 'users.js';
 let users = [];
 
 // Admin's private channel ID
-const ADMIN_CHANNEL_ID = '@admin_private_channel';
+const ADMIN_CHANNEL_ID = -1002433715335;
 
 // Required channel
 const REQUIRED_CHANNEL = '@awt_bots';
