@@ -21,7 +21,16 @@ const REQUIRED_CHANNEL = '@awt_bots';
 
 // Load existing users from users.js
 if (fs.existsSync(USERS_FILE)) {
-    users = require(`./${USERS_FILE}`);
+    try {
+        const fileData = fs.readFileSync(USERS_FILE, 'utf8');
+        users = JSON.parse(fileData);
+        if (!Array.isArray(users)) users = [];
+    } catch (error) {
+        console.error("Error reading users.js:", error);
+        users = [];
+    }
+} else {
+    users = [];
 }
 
 // Save users to file
@@ -40,6 +49,14 @@ const isUserSubscribed = async (userId) => {
     }
 };
 
+// Function to send a message and delete it after 30 seconds
+const sendTempMessage = async (chatId, text) => {
+    const msg = await bot.sendMessage(chatId, text);
+    setTimeout(() => {
+        bot.deleteMessage(chatId, msg.message_id).catch(() => {});
+    }, 30000);
+};
+
 // Handle the /start command
 bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
@@ -48,7 +65,7 @@ bot.onText(/\/start/, async (msg) => {
     // Check if the user is subscribed
     const isSubscribed = await isUserSubscribed(userId);
     if (!isSubscribed) {
-        bot.sendMessage(chatId, `You must join our channel to use this bot.`, {
+        const joinMessage = await bot.sendMessage(chatId, `You must join our channel to use this bot.`, {
             reply_markup: {
                 inline_keyboard: [
                     [{ text: "Join Channel", url: `https://t.me/${REQUIRED_CHANNEL.replace('@', '')}` }],
@@ -56,6 +73,9 @@ bot.onText(/\/start/, async (msg) => {
                 ]
             }
         });
+
+        // Delete join message after 30 seconds
+        setTimeout(() => bot.deleteMessage(chatId, joinMessage.message_id).catch(() => {}), 30000);
         return;
     }
 
@@ -68,7 +88,8 @@ bot.onText(/\/start/, async (msg) => {
         bot.sendMessage(ADMIN_CHANNEL_ID, `New user started bot: ${userId}`);
     }
 
-    bot.sendMessage(chatId, 'Welcome! Send me a Spotify track URL to download the track.');
+    // Send welcome message and delete it after 30 seconds
+    sendTempMessage(chatId, 'Welcome! Send me a Spotify track URL to download the track.');
 });
 
 // Handle "I Have Joined" button click
@@ -79,13 +100,15 @@ bot.on('callback_query', async (query) => {
     if (query.data === "check_subscription") {
         const isSubscribed = await isUserSubscribed(userId);
         if (isSubscribed) {
-            bot.sendMessage(chatId, "Thank you for joining! You can now use the bot.");
+            const thankYouMessage = await bot.sendMessage(chatId, "Thank you for joining! You can now use the bot.");
+            setTimeout(() => bot.deleteMessage(chatId, thankYouMessage.message_id).catch(() => {}), 30000);
         } else {
-            bot.sendMessage(chatId, "You have not joined yet. Please join and then click the button again.");
+            sendTempMessage(chatId, "You have not joined yet. Please join and then click the button again.");
         }
     }
 });
 
+// Handle Spotify track URLs
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text || "";
@@ -96,7 +119,7 @@ bot.on('message', async (msg) => {
     // Check if the user is subscribed
     const isSubscribed = await isUserSubscribed(msg.from.id);
     if (!isSubscribed) {
-        return bot.sendMessage(chatId, `You must join our channel to use this bot.`, {
+        const joinMessage = await bot.sendMessage(chatId, `You must join our channel to use this bot.`, {
             reply_markup: {
                 inline_keyboard: [
                     [{ text: "Join Channel", url: `https://t.me/${REQUIRED_CHANNEL.replace('@', '')}` }],
@@ -104,25 +127,18 @@ bot.on('message', async (msg) => {
                 ]
             }
         });
+
+        setTimeout(() => bot.deleteMessage(chatId, joinMessage.message_id).catch(() => {}), 30000);
+        return;
     }
 
     // Check if it's a Spotify track URL
     if (text.startsWith('https://open.spotify.com/track/')) {
         try {
-            // List of animated emoji messages
-            const loadingMessages = [
-                "Downloading your track 🎵",
-                "Downloading your track 🎶",
-                "Downloading your track 🔄",
-                "Downloading your track ⏳",
-                "Downloading your track 🎼",
-                "Downloading your track 🎧"
-            ];
-
+            const loadingMessages = ["Downloading your track 🎵", "Downloading your track 🎶", "Downloading your track 🔄"];
             let loadingIndex = 0;
             const loadingMessage = await bot.sendMessage(chatId, loadingMessages[loadingIndex]);
 
-            // Update the message every 1 second
             const animationInterval = setInterval(async () => {
                 loadingIndex = (loadingIndex + 1) % loadingMessages.length;
                 await bot.editMessageText(loadingMessages[loadingIndex], {
@@ -131,30 +147,20 @@ bot.on('message', async (msg) => {
                 });
             }, 1000);
 
-            // Construct the API URL
             const apiUrl = `${SPOTIFY_API_URL}?url=${encodeURIComponent(text)}`;
-
-            // Fetch the download link
             const response = await axios.get(apiUrl, { responseType: 'stream' });
 
-            // Send the audio file with a caption
-            await bot.sendAudio(chatId, response.data, {
-                caption: 'Downloaded by @awt_spotifymusic_bot'
-            });
+            await bot.sendAudio(chatId, response.data, { caption: 'Downloaded by @awt_spotifymusic_bot' });
 
-            // Stop the animation and delete the message
             clearInterval(animationInterval);
-            bot.deleteMessage(chatId, loadingMessage.message_id);
-
+            bot.deleteMessage(chatId, loadingMessage.message_id).catch(() => {});
         } catch (error) {
-            console.error(error);
-            bot.sendMessage(chatId, 'Failed to download the track. Please try again later.');
+            sendTempMessage(chatId, 'Failed to download the track. Please try again later.');
         }
     } else {
-        bot.sendMessage(chatId, 'Please send a valid Spotify track URL.');
+        sendTempMessage(chatId, 'Please send a valid Spotify track URL.');
     }
 });
-
 
 // Broadcast feature (Admin only)
 bot.onText(/\/broadcast/, async (msg) => {
