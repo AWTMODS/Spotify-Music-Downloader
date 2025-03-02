@@ -86,18 +86,17 @@ bot.on('callback_query', async (query) => {
     }
 });
 
-// Handle Spotify track URLs
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text || "";
 
-    // Ignore non-text messages
-    if (!text) return;
+    // Ignore non-text messages and prevent processing /start as normal text
+    if (!text || text.startsWith("/start")) return;
 
     // Check if the user is subscribed
     const isSubscribed = await isUserSubscribed(msg.from.id);
     if (!isSubscribed) {
-        bot.sendMessage(chatId, `You must join our channel to use this bot.`, {
+        return bot.sendMessage(chatId, `You must join our channel to use this bot.`, {
             reply_markup: {
                 inline_keyboard: [
                     [{ text: "Join Channel", url: `https://t.me/${REQUIRED_CHANNEL.replace('@', '')}` }],
@@ -105,14 +104,32 @@ bot.on('message', async (msg) => {
                 ]
             }
         });
-        return;
     }
 
     // Check if it's a Spotify track URL
     if (text.startsWith('https://open.spotify.com/track/')) {
         try {
-            // Inform user about the download process
-            const messageInfo = await bot.sendMessage(chatId, 'Downloading your track...');
+            // List of animated emoji messages
+            const loadingMessages = [
+                "Downloading your track 🎵",
+                "Downloading your track 🎶",
+                "Downloading your track 🔄",
+                "Downloading your track ⏳",
+                "Downloading your track 🎼",
+                "Downloading your track 🎧"
+            ];
+
+            let loadingIndex = 0;
+            const loadingMessage = await bot.sendMessage(chatId, loadingMessages[loadingIndex]);
+
+            // Update the message every 1 second
+            const animationInterval = setInterval(async () => {
+                loadingIndex = (loadingIndex + 1) % loadingMessages.length;
+                await bot.editMessageText(loadingMessages[loadingIndex], {
+                    chat_id: chatId,
+                    message_id: loadingMessage.message_id
+                });
+            }, 1000);
 
             // Construct the API URL
             const apiUrl = `${SPOTIFY_API_URL}?url=${encodeURIComponent(text)}`;
@@ -125,8 +142,10 @@ bot.on('message', async (msg) => {
                 caption: 'Downloaded by @awt_spotifymusic_bot'
             });
 
-            // Delete the "Downloading your track..." message
-            bot.deleteMessage(chatId, messageInfo.message_id);
+            // Stop the animation and delete the message
+            clearInterval(animationInterval);
+            bot.deleteMessage(chatId, loadingMessage.message_id);
+
         } catch (error) {
             console.error(error);
             bot.sendMessage(chatId, 'Failed to download the track. Please try again later.');
@@ -135,6 +154,7 @@ bot.on('message', async (msg) => {
         bot.sendMessage(chatId, 'Please send a valid Spotify track URL.');
     }
 });
+
 
 // Broadcast feature (Admin only)
 bot.onText(/\/broadcast/, async (msg) => {
