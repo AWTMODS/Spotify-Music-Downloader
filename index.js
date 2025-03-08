@@ -1,6 +1,8 @@
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
 const fs = require('fs');
+const AdmZip = require('adm-zip');
+const path = require('path');
 
 // Replace with your Telegram bot token
 const token = '8017123987:AAH2_Kko-W3iCSbRIQ-02Xb0vIFR83yIgGo';
@@ -151,23 +153,31 @@ const downloadPlaylist = async (chatId, playlistUrl) => {
         const loadingMessage = await bot.sendMessage(chatId, "Fetching playlist tracks...");
 
         const apiUrl = `${SPOTIFY_API_URL}?url=${encodeURIComponent(playlistUrl)}`;
-        const response = await axios.get(apiUrl);
+        const response = await axios.get(apiUrl, { responseType: 'arraybuffer' });
 
-        console.log("API Response:", response.data); // Debugging: Log the API response
+        // Save the ZIP file temporarily
+        const zipFilePath = path.join(__dirname, 'playlist.zip');
+        fs.writeFileSync(zipFilePath, response.data);
 
-        if (!response.data || !response.data.tracks) {
-            throw new Error("Invalid playlist data received.");
-        }
+        // Extract the ZIP file
+        const zip = new AdmZip(zipFilePath);
+        const zipEntries = zip.getEntries();
 
-        const tracks = response.data.tracks;
-        await bot.editMessageText(`Found ${tracks.length} tracks. Starting download...`, {
+        await bot.editMessageText(`Found ${zipEntries.length} tracks. Starting download...`, {
             chat_id: chatId,
             message_id: loadingMessage.message_id
         });
 
-        for (const track of tracks) {
-            await downloadTrack(chatId, track.url);
+        // Send each audio file
+        for (const entry of zipEntries) {
+            if (!entry.isDirectory && entry.entryName.endsWith('.mp3')) {
+                const audioBuffer = entry.getData();
+                await bot.sendAudio(chatId, audioBuffer, { caption: 'Downloaded by @awt_spotifymusic_bot' });
+            }
         }
+
+        // Clean up the ZIP file
+        fs.unlinkSync(zipFilePath);
 
         bot.deleteMessage(chatId, loadingMessage.message_id).catch(() => {});
     } catch (error) {
